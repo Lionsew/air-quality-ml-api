@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    container_name: air_quality_ml_api
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./data:/workspace/data
+    env_file:
+      - .env
+    environment:
+      # Sobrescribe DATABASE_URL para persistir el archivo SQLite en la carpeta mapeada ./data
+      - DATABASE_URL=sqlite:////workspace/data/air_quality.db
+    restart: unless-stopped
