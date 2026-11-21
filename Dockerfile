@@ -12,10 +12,11 @@ COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copiar código fuente, interfaz gráfica y modelo entrenado
+# Copiar código fuente, interfaz gráfica, modelo entrenado y script de entrenamiento
 COPY --chown=user app/ ./app/
 COPY --chown=user model/ ./model/
 COPY --chown=user static/ ./static/
+COPY --chown=user train_forecast_model.py .
 
 # Hugging Face Spaces expone el puerto 7860 por defecto
 EXPOSE 7860
