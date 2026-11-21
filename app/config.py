@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # Por defecto usa SQLite local. Si defines DATABASE_URL en .env o en la nube, usará Postgres.
     DATABASE_URL: str = "sqlite:///./air_quality.db"
     OPENAQ_API_KEY: str = ""
+    ADMIN_TOKEN: str = "Contraseña Admin"  # Cámbialo por tu clave en .env y en Hugging Face Secrets
 
     model_config = SettingsConfigDict(
         env_file=".env",

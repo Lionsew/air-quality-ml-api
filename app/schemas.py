@@ -38,3 +38,17 @@ class ForecastResponse(BaseModel):
     history_hours: int
     forecast_hours: int
     series: List[TimeSeriesPoint]
+
+class CitySummaryItem(BaseModel):
+    city: str
+    latitude: float
+    longitude: float
+    predicted_pm25: float
+    recorded_pm25: float
+    temperature_2m: float
+    wind_speed_10m: float
+    recorded_at: datetime
+
+
+class CitiesSummaryResponse(BaseModel):
+    cities: List[CitySummaryItem]

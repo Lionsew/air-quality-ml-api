@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import httpx
 import joblib
@@ -8,13 +8,15 @@ import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import desc, text
+from sqlalchemy import desc, text, func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import AirMeasurement, ModelMetric
 from app.schemas import (
+    CitiesSummaryResponse,
+    CitySummaryItem,
     ForecastResponse,
     HealthResponse,
     PredictionResponse,
@@ -84,18 +86,54 @@ def health_check(db: Session = Depends(get_db)):
         database_connected=db_ok,
     )
 
-
 @app.get("/metrics/latest", tags=["Monitoring"])
 def get_latest_metrics(db: Session = Depends(get_db)):
-    """Devuelve las últimas métricas de entrenamiento (MAE y RMSE) registradas en Neon."""
+    """
+    Devuelve las últimas métricas de entrenamiento y evalúa si el modelo necesita reentrenarse
+    según su antigüedad (> 7 días) o el volumen de nuevos datos acumulados (> 150 registros).
+    """
     metric = (
         db.query(ModelMetric)
         .filter(ModelMetric.model_name == "autoregressive_84h_ridge")
         .order_by(desc(ModelMetric.trained_at))
         .first()
     )
+
+    # Caso 1: Nunca se ha entrenado el modelo autoregresivo
     if not metric:
-        return {"available": False}
+        total_records = db.query(func.count(AirMeasurement.id)).scalar() or 0
+        return {
+            "available": False,
+            "needs_retraining": True,
+            "reason": f"Modelo 84h aún sin entrenar ({total_records} registros disponibles en Neon).",
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    trained_at = metric.trained_at
+    if trained_at.tzinfo is None:
+        trained_at = trained_at.replace(tzinfo=timezone.utc)
+
+    hours_since_train = (now_utc - trained_at).total_seconds() / 3600.0
+
+    # Contar nuevos registros reales ingresados desde el último entrenamiento
+    new_records_count = (
+        db.query(func.count(AirMeasurement.id))
+        .filter(
+            AirMeasurement.recorded_at > trained_at,
+            AirMeasurement.is_fallback == False,  # noqa: E712
+        )
+        .scalar()
+        or 0
+    )
+
+    # Reglas de decisión para sugerir reentrenamiento
+    reasons = []
+    if hours_since_train >= 168:  # 7 días
+        reasons.append(f"Han pasado {int(hours_since_train // 24)} días desde el último entrenamiento")
+    if new_records_count >= 150:  # ~30h nuevas en las 5 ciudades
+        reasons.append(f"Hay {new_records_count} nuevos registros reales listos para incorporar")
+
+    needs_retraining = len(reasons) > 0
 
     return {
         "available": True,
@@ -103,7 +141,11 @@ def get_latest_metrics(db: Session = Depends(get_db)):
         "mae": metric.mae,
         "rmse": metric.rmse,
         "samples_count": metric.samples_count,
-        "trained_at": metric.trained_at,
+        "trained_at": trained_at,
+        "hours_since_train": round(hours_since_train, 1),
+        "new_records_since_train": new_records_count,
+        "needs_retraining": needs_retraining,
+        "reason": " · ".join(reasons) if needs_retraining else "Modelo actualizado y dentro de parámetros.",
     }
 
 
@@ -275,7 +317,7 @@ async def forecast_air_quality(city: str, db: Session = Depends(get_db)):
                 )
             )
         model_used = "meteo_hybrid_12h"
-
+    
     return ForecastResponse(
         city=latest.city,
         model_used=model_used,
@@ -283,3 +325,96 @@ async def forecast_air_quality(city: str, db: Session = Depends(get_db)):
         forecast_hours=12,
         series=series,
     )
+
+from fastapi import Depends, FastAPI, Header, HTTPException
+from train_forecast_model import train
+
+# ... dentro de app/main.py:
+
+@app.post("/model/retrain", tags=["Monitoring"])
+def retrain_forecast_model(x_admin_token: str = Header(default="")):
+    """
+    Ejecuta el reentrenamiento del modelo 84h -> 12h bajo demanda, guarda las nuevas
+    métricas en Neon y recarga el modelo en memoria sin reiniciar la API.
+    """
+    if x_admin_token != settings.ADMIN_TOKEN:
+        raise HTTPException(
+            status_code=401,
+            detail="Token de administrador inválido. Acceso denegado."
+        )
+
+    try:
+        train()
+        if FORECAST_MODEL_PATH.exists():
+            ml_assets["forecast_model"] = joblib.load(FORECAST_MODEL_PATH)
+        return {
+            "status": "ok",
+            "message": "Modelo reentrenado y recargado en memoria correctamente."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error durante el reentrenamiento: {str(e)}"
+        )
+
+@app.get("/cities/summary", response_model=CitiesSummaryResponse, tags=["Predictions"])
+def get_cities_summary(db: Session = Depends(get_db)):
+    """
+    Devuelve el último estado meteorológico, coordenadas y predicción de PM2.5
+    para todas las ciudades monitorizadas, ordenadas de aire más limpio a más contaminado.
+    """
+    target_cities = ["Alicante", "Madrid", "Barcelona", "Valencia", "Sevilla"]
+    latest_records = []
+
+    for city_name in target_cities:
+        rec = (
+            db.query(AirMeasurement)
+            .filter(AirMeasurement.city.ilike(city_name))
+            .order_by(desc(AirMeasurement.recorded_at))
+            .first()
+        )
+        if rec:
+            latest_records.append(rec)
+
+    if not latest_records:
+        return CitiesSummaryResponse(cities=[])
+
+    # Preparar matriz de características en bloque para inferencia rápida
+    rows = []
+    for r in latest_records:
+        hour = r.recorded_at.hour
+        month = r.recorded_at.month
+        rows.append({
+            "temperature_2m": r.temperature_2m,
+            "relative_humidity_2m": r.relative_humidity_2m,
+            "wind_speed_10m": r.wind_speed_10m,
+            "wind_direction_10m": r.wind_direction_10m,
+            "precipitation": r.precipitation,
+            "hour_sin": np.sin(2 * np.pi * hour / 24.0),
+            "hour_cos": np.cos(2 * np.pi * hour / 24.0),
+            "month_sin": np.sin(2 * np.pi * month / 12.0),
+            "month_cos": np.cos(2 * np.pi * month / 12.0),
+        })
+
+    feature_df = pd.DataFrame(rows)
+    preds = ml_assets["model"].predict(feature_df)
+
+    items = []
+    for r, pred_val in zip(latest_records, preds):
+        items.append(
+            CitySummaryItem(
+                city=r.city,
+                latitude=r.latitude,
+                longitude=r.longitude,
+                predicted_pm25=max(0.0, round(float(pred_val), 2)),
+                recorded_pm25=round(float(r.pm25), 2),
+                temperature_2m=round(float(r.temperature_2m), 1),
+                wind_speed_10m=round(float(r.wind_speed_10m), 1),
+                recorded_at=r.recorded_at,
+            )
+        )
+
+    # Ordenar de menor a mayor concentración predicha (ranking de aire más limpio)
+    items.sort(key=lambda x: x.predicted_pm25)
+
+    return CitiesSummaryResponse(cities=items)   
