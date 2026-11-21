@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" class="dark">
+<html lang="es" class="dark scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,14 +11,29 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
+          colors: {
+            brand: {
+              50: '#fff7ed',
+              100: '#ffedd5',
+              400: '#fb923c',
+              500: '#f97316',
+              600: '#ea580c',
+            },
+            dark: {
+              900: '#0b0f19',
+              800: '#111827',
+              700: '#1f2937',
+              600: '#374151'
+            }
+          },
           fontFamily: {
-            sans: ['Inter', 'sans-serif'],
+            sans: ['Inter', 'system-ui', 'sans-serif'],
             mono: ['JetBrains Mono', 'monospace'],
           }
         }
@@ -26,66 +41,98 @@
     }
   </script>
   <style>
-    body {
-      background-color: #060913;
-      background-image: 
-        radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.08) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(56, 189, 248, 0.08) 0px, transparent 50%);
-    }
     .glass-card {
-      background: rgba(15, 23, 42, 0.65);
+      background: rgba(39, 31, 17, 0.7);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(51, 65, 85, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: border-color 0.25s ease;
+    }
+    .glass-card:hover {
+      border-color: rgba(249, 116, 22, 0.724);
     }
     .gauge-arc {
       transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.5s ease;
     }
-    /* Oscurece únicamente el fondo del mapa OpenStreetMap sin afectar a los marcadores ni tooltips */
+    /* Oscurece el fondo del mapa OpenStreetMap con un matiz cálido acorde al tema */
     #spainMap .leaflet-tile-pane {
-      filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(90%);
+      filter: invert(100%) hue-rotate(180deg) brightness(90%) contrast(92%) sepia(15%);
     }
     /* Ajuste oscuro para tooltips de Leaflet */
     .leaflet-tooltip {
-      background-color: rgba(15, 23, 42, 0.95) !important;
-      color: #f8fafc !important;
-      border: 1px solid #334155 !important;
+      background-color: rgba(11, 15, 25, 0.95) !important;
+      color: #f3f4f6 !important;
+      border: 1px solid rgba(249, 115, 22, 0.4) !important;
       border-radius: 0.5rem !important;
-      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5) !important;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.6) !important;
     }
     .leaflet-tooltip-top:before {
-      border-top-color: #334155 !important;
+      border-top-color: rgba(249, 115, 22, 0.4) !important;
     }
   </style>
 </head>
-<body class="text-slate-100 min-h-screen flex flex-col justify-between font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+<body class="bg-dark-900 text-gray-200 min-h-screen flex flex-col justify-between font-sans antialiased selection:bg-brand-500 selection:text-black">
+
+  <!-- Gradientes ambientales de fondo -->
+  <div class="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+    <div class="absolute -top-40 -left-40 w-96 h-96 bg-brand-500/10 rounded-full blur-[120px]"></div>
+    <div class="absolute top-1/2 -right-40 w-96 h-96 bg-amber-600/10 rounded-full blur-[140px]"></div>
+    <div class="absolute -bottom-40 left-1/3 w-96 h-96 bg-orange-600/10 rounded-full blur-[130px]"></div>
+  </div>
 
   <!-- Barra superior -->
-  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur-md">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+  <header class="sticky top-0 z-30 border-b border-gray-800 bg-dark-900/80 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center justify-between gap-4">
       <div class="flex items-center gap-3.5">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-950/50">
+        <div class="w-10 h-10 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center text-brand-400 shadow-lg shadow-brand-500/10">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
           </svg>
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-lg font-bold tracking-tight text-white">Air Quality ML Predictor</h1>
-            <span class="hidden sm:inline-block px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/30">84h → 12h Forecast</span>
+            <h1 class="text-lg font-bold tracking-tight text-white">
+              Air Quality <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-amber-200">ML Predictor</span>
+            </h1>
+            <span class="hidden sm:inline-block px-2.5 py-0.5 text-[10px] font-mono uppercase tracking-wider bg-brand-500/10 text-brand-400 rounded-full border border-brand-500/20">84h → 12h Forecast</span>
           </div>
-          <p class="text-xs text-slate-400">Inferencia &amp; Serie Temporal PM2.5 · Scikit-Learn + FastAPI</p>
+          <p class="text-xs text-gray-400">Inferencia &amp; Serie Temporal PM2.5 · Scikit-Learn + FastAPI</p>
         </div>
       </div>
 
-      <div class="flex items-center gap-3 text-xs sm:text-sm">
-        <span id="healthBadge" class="px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400 text-xs font-medium flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></span>
+      <!-- Botones de navegación y estado -->
+      <div class="flex flex-wrap items-center gap-2 sm:gap-2.5 text-xs">
+        <span id="healthBadge" class="px-3 py-1.5 rounded-full bg-dark-800 border border-gray-800 text-gray-400 text-xs font-medium flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-gray-500 animate-pulse"></span>
           Comprobando API...
         </span>
-        <a href="/docs" target="_blank" class="px-3.5 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium transition flex items-center gap-1.5 shadow-sm">
+
+        <!-- Botón Portfolio -->
+        <a href="https://lionsew.github.io/" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-brand-400 font-medium transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          </svg>
+          <span>Portfolio</span>
+        </a>
+
+        <!-- Botón GitHub -->
+        <a href="https://github.com/Lionsew/air-quality-ml-api" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-brand-400 font-medium transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-brand-400" fill="currentColor" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+          <span>GitHub</span>
+        </a>
+
+        <!-- Botón Hugging Face -->
+        <a href="https://huggingface.co/spaces/Lionsew/air-quality-ml-api/tree/main" target="_blank" rel="noopener noreferrer" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-brand-400 font-medium transition flex items-center gap-1.5">
+          <span class="text-sm leading-none">🤗</span>
+          <span>HF Space</span>
+        </a>
+
+        <!-- Botón API Docs -->
+        <a href="/docs" target="_blank" class="px-3.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-400 text-black font-semibold transition flex items-center gap-1.5 shadow-sm shadow-brand-500/20">
           <span>API Docs</span>
-          <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
         </a>
@@ -94,13 +141,13 @@
   </header>
 
   <!-- Contenido principal -->
-  <main class="max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 flex-1">
+  <main class="max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
     
     <!-- Barra de control: Selector de ciudad + Refrescar -->
     <section class="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <span class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2.5">Estación / Ciudad Monitorizada</span>
-        <div class="inline-flex flex-wrap p-1 rounded-xl bg-slate-900/90 border border-slate-800/90 gap-1" id="cityButtons">
+        <span class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2.5">Estación / Ciudad Monitorizada</span>
+        <div class="inline-flex flex-wrap p-1 rounded-xl bg-dark-800/90 border border-gray-800 gap-1" id="cityButtons">
           <button data-city="Alicante" class="city-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">Alicante</button>
           <button data-city="Madrid" class="city-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">Madrid</button>
           <button data-city="Barcelona" class="city-btn px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200">Barcelona</button>
@@ -110,14 +157,14 @@
       </div>
 
       <div class="flex items-center gap-3 self-start sm:self-end">
-        <div id="coordsBadge" class="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/60 border border-slate-800/80 text-xs font-mono text-slate-400">
-          <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <div id="coordsBadge" class="hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg bg-dark-800/80 border border-gray-800 text-xs font-mono text-gray-400">
+          <svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           <span id="coordsText">--°, --°</span>
         </div>
-        <button id="refreshBtn" title="Actualizar lectura y pronóstico" class="p-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition active:scale-95">
+        <button id="refreshBtn" title="Actualizar lectura y pronóstico" class="p-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 hover:text-brand-400 transition active:scale-95">
           <svg id="refreshIcon" class="w-4 h-4 transition-transform duration-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
@@ -134,20 +181,20 @@
     </div>
 
     <!-- Alerta MLOps: Aviso de Reentrenamiento Necesario -->
-    <div id="retrainAlert" class="hidden mb-6 p-4 rounded-xl bg-amber-950/50 border border-amber-500/40 text-amber-200 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-amber-950/20">
+    <div id="retrainAlert" class="hidden mb-6 p-4 rounded-xl bg-amber-950/50 border border-brand-500/40 text-amber-200 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-brand-500/10">
       <div class="flex items-start sm:items-center gap-3">
-        <div class="w-9 h-9 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+        <div class="w-9 h-9 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center shrink-0">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
         <div>
-          <span class="font-semibold text-amber-300 block">Reentrenamiento de Modelo Recomendado</span>
+          <span class="font-semibold text-brand-400 block">Reentrenamiento de Modelo Recomendado</span>
           <span id="retrainReason" class="text-xs text-amber-200/80">--</span>
         </div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        <button id="retrainBtn" onclick="triggerRetrain()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition flex items-center gap-2 shadow-md shadow-amber-950/40 cursor-pointer">
+        <button id="retrainBtn" onclick="triggerRetrain()" class="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-black font-semibold text-xs transition flex items-center gap-2 shadow-md shadow-brand-500/20 cursor-pointer">
           <svg id="retrainSpinner" class="hidden w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
@@ -165,15 +212,15 @@
         
         <!-- Tarjeta Principal: Gauge + Predicción Actual (7 columnas) -->
         <div class="lg:col-span-7 glass-card rounded-2xl p-6 sm:p-8 flex flex-col justify-between relative overflow-hidden">
-          <div id="ambientGlow" class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none transition-colors duration-700"></div>
+          <div id="ambientGlow" class="absolute -top-24 -right-24 w-64 h-64 rounded-full bg-brand-500/10 blur-3xl pointer-events-none transition-colors duration-700"></div>
 
           <div>
             <div class="flex flex-wrap items-center justify-between gap-2 mb-6">
               <div>
-                <span class="text-xs uppercase tracking-wider text-slate-400 font-semibold block">Inferencia Instantánea (t₀)</span>
+                <span class="text-xs uppercase tracking-wider text-gray-400 font-semibold block">Inferencia Instantánea (t₀)</span>
                 <h2 id="cityTitle" class="text-xl font-bold text-white mt-0.5">Alicante</h2>
               </div>
-              <span id="qualityBadge" class="px-3.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+              <span id="qualityBadge" class="px-3.5 py-1 rounded-full text-xs font-semibold bg-gray-800 text-gray-300 border border-gray-700">
                 Evaluando...
               </span>
             </div>
@@ -182,54 +229,54 @@
               <!-- Medidor Semicircular SVG -->
               <div class="relative w-48 h-28 flex items-end justify-center shrink-0">
                 <svg class="w-48 h-28 overflow-visible" viewBox="0 0 200 110">
-                  <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#1e293b" stroke-width="14" stroke-linecap="round" />
+                  <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#1f2937" stroke-width="14" stroke-linecap="round" />
                   <path id="gaugeProgress" class="gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#10b981" stroke-width="14" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
                 </svg>
                 <div class="absolute bottom-0 text-center">
-                  <span class="text-[11px] uppercase tracking-widest text-slate-400 block">PM2.5 Est.</span>
+                  <span class="text-[11px] uppercase tracking-widest text-gray-400 block">PM2.5 Est.</span>
                   <span id="predictedValue" class="text-4xl font-extrabold font-mono text-white tracking-tight">--</span>
-                  <span class="text-xs text-slate-400 font-mono">µg/m³</span>
+                  <span class="text-xs text-gray-400 font-mono">µg/m³</span>
                 </div>
               </div>
 
               <!-- Descripción y Comparativa -->
               <div class="flex-1 text-center sm:text-left">
-                <p id="qualityDescription" class="text-sm text-slate-300 leading-relaxed mb-4">
+                <p id="qualityDescription" class="text-sm text-gray-300 leading-relaxed mb-4">
                   Cargando datos meteorológicos y ejecutando inferencia...
                 </p>
 
-                <div class="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 grid grid-cols-2 gap-3 text-left">
+                <div class="p-3.5 rounded-xl bg-dark-900/70 border border-gray-800 grid grid-cols-2 gap-3 text-left">
                   <div>
-                    <span class="text-[11px] text-slate-400 block">Último Registro DB</span>
-                    <span id="recordedPm25" class="text-sm font-mono font-bold text-slate-200">-- µg/m³</span>
+                    <span class="text-[11px] text-gray-400 block">Último Registro DB</span>
+                    <span id="recordedPm25" class="text-sm font-mono font-bold text-gray-200">-- µg/m³</span>
                   </div>
                   <div>
-                    <span class="text-[11px] text-slate-400 block">Desviación Modelo</span>
-                    <span id="deltaPm25" class="text-sm font-mono font-bold text-slate-400">--</span>
+                    <span class="text-[11px] text-gray-400 block">Desviación Modelo</span>
+                    <span id="deltaPm25" class="text-sm font-mono font-bold text-gray-400">--</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="mt-6 pt-5 border-t border-slate-800/80">
-            <div class="flex justify-between text-[11px] text-slate-400 mb-1.5 font-mono">
+          <div class="mt-6 pt-5 border-t border-gray-800">
+            <div class="flex justify-between text-[11px] text-gray-400 mb-1.5 font-mono">
               <span>0 (Óptimo)</span>
               <span>12 (Límite OMS)</span>
               <span>35.4</span>
               <span>50+ µg/m³</span>
             </div>
-            <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden flex">
+            <div class="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden flex">
               <div class="bg-emerald-500 h-full" style="width: 24%"></div>
-              <div class="bg-amber-400 h-full" style="width: 46.8%"></div>
+              <div class="bg-brand-400 h-full" style="width: 46.8%"></div>
               <div class="bg-rose-500 h-full" style="width: 29.2%"></div>
             </div>
-            <div class="mt-4 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+            <div class="mt-4 flex flex-wrap items-center justify-between text-xs text-gray-400 gap-2">
               <span class="flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-brand-400"></span>
                 Features cíclicas (hora/mes) activas
               </span>
-              <span>Última captura: <strong id="recordedAt" class="text-slate-200 font-mono">--</strong></span>
+              <span>Última captura: <strong id="recordedAt" class="text-gray-200 font-mono">--</strong></span>
             </div>
           </div>
         </div>
@@ -238,73 +285,73 @@
         <div class="lg:col-span-5 glass-card rounded-2xl p-6 sm:p-8 flex flex-col justify-between">
           <div>
             <div class="flex items-center justify-between mb-5">
-              <h2 class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Telemetría Meteorológica</h2>
-              <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">Open-Meteo</span>
+              <h2 class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Telemetría Meteorológica</h2>
+              <span class="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">Open-Meteo</span>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
               <!-- Temperatura -->
-              <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between">
+              <div class="p-3.5 rounded-xl bg-dark-900/60 border border-gray-800 flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <div class="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                  <div class="w-9 h-9 rounded-lg bg-brand-500/10 text-brand-400 flex items-center justify-center">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z" />
                     </svg>
                   </div>
                   <div>
-                    <span class="text-xs text-slate-400 block">Temperatura (2m)</span>
-                    <span class="text-[11px] text-slate-500">Térmica ambiental</span>
+                    <span class="text-xs text-gray-400 block">Temperatura (2m)</span>
+                    <span class="text-[11px] text-gray-500">Térmica ambiental</span>
                   </div>
                 </div>
                 <span id="tempVal" class="font-mono text-base font-bold text-white">-- °C</span>
               </div>
 
               <!-- Humedad -->
-              <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between">
+              <div class="p-3.5 rounded-xl bg-dark-900/60 border border-gray-800 flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <div class="w-9 h-9 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
+                  <div class="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z" />
                     </svg>
                   </div>
                   <div>
-                    <span class="text-xs text-slate-400 block">Humedad Relativa</span>
-                    <span class="text-[11px] text-slate-500">Saturación aérea</span>
+                    <span class="text-xs text-gray-400 block">Humedad Relativa</span>
+                    <span class="text-[11px] text-gray-500">Saturación aérea</span>
                   </div>
                 </div>
                 <span id="humidityVal" class="font-mono text-base font-bold text-white">-- %</span>
               </div>
 
               <!-- Viento -->
-              <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between">
+              <div class="p-3.5 rounded-xl bg-dark-900/60 border border-gray-800 flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <div class="w-9 h-9 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center">
+                  <div class="w-9 h-9 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
                     </svg>
                   </div>
                   <div>
-                    <span class="text-xs text-slate-400 block">Viento (10m)</span>
-                    <span id="windDirText" class="text-[11px] text-slate-400 font-mono">Dir: --</span>
+                    <span class="text-xs text-gray-400 block">Viento (10m)</span>
+                    <span id="windDirText" class="text-[11px] text-gray-400 font-mono">Dir: --</span>
                   </div>
                 </div>
                 <div class="flex items-center gap-2.5">
-                  <span id="windArrow" class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-teal-400 text-xs transition-transform duration-500">↑</span>
+                  <span id="windArrow" class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-800 text-brand-400 text-xs transition-transform duration-500">↑</span>
                   <span id="windSpeedVal" class="font-mono text-base font-bold text-white">-- km/h</span>
                 </div>
               </div>
 
               <!-- Precipitación -->
-              <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/80 flex items-center justify-between">
+              <div class="p-3.5 rounded-xl bg-dark-900/60 border border-gray-800 flex items-center justify-between">
                 <div class="flex items-center gap-3">
-                  <div class="w-9 h-9 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                  <div class="w-9 h-9 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M20 16.2A4.5 4.5 0 0017.5 8h-1.8A7 7 0 104 14.9M16 14v6m-4-4v6m-4-6v6" />
                     </svg>
                   </div>
                   <div>
-                    <span class="text-xs text-slate-400 block">Precipitación</span>
-                    <span class="text-[11px] text-slate-500">Efecto lavado atmosférico</span>
+                    <span class="text-xs text-gray-400 block">Precipitación</span>
+                    <span class="text-[11px] text-gray-500">Efecto lavado atmosférico</span>
                   </div>
                 </div>
                 <span id="precipVal" class="font-mono text-base font-bold text-white">-- mm</span>
@@ -312,7 +359,7 @@
             </div>
           </div>
 
-          <p class="mt-5 text-[11px] text-slate-500 leading-relaxed">
+          <p class="mt-5 text-[11px] text-gray-500 leading-relaxed">
             * El viento y la precipitación favorecen la dispersión y deposición húmeda de partículas en suspensión.
           </p>
         </div>
@@ -324,29 +371,29 @@
           <div>
             <div class="flex flex-wrap items-center gap-2.5">
               <h2 class="text-base font-bold text-white">Ventana Temporal: Histórico (84h) &amp; Pronóstico (+12h)</h2>
-              <span id="forecastModelBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+              <span id="forecastModelBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">
                 Cargando modelo...
               </span>
-              <span id="mlopsMetricsBadge" class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/25">
+              <span id="mlopsMetricsBadge" class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-brand-500/10 text-brand-400 border border-brand-500/20">
                 MAE: -- · RMSE: --
               </span>
-              <button onclick="triggerRetrain()" title="Forzar reentrenamiento del modelo ahora" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer">
+              <button onclick="triggerRetrain()" title="Forzar reentrenamiento del modelo ahora" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-brand-400 border border-gray-700 transition cursor-pointer">
                 ↻ Reentrenar
               </button>
             </div>
-            <p class="text-xs text-slate-400 mt-1">
+            <p class="text-xs text-gray-400 mt-1">
               Evolución de concentración PM2.5 (µg/m³) basada en la ventana reciente almacenada en Neon y proyección a 12 horas.
             </p>
           </div>
 
           <!-- Leyenda personalizada -->
           <div class="flex items-center gap-4 text-xs shrink-0">
-            <span class="flex items-center gap-2 text-slate-300">
-              <span class="w-3 h-0.5 bg-sky-400 inline-block"></span>
+            <span class="flex items-center gap-2 text-gray-300">
+              <span class="w-3 h-0.5 bg-amber-300 inline-block"></span>
               Histórico (<span id="histCount">--</span>h)
             </span>
-            <span class="flex items-center gap-2 text-emerald-300 font-medium">
-              <span class="w-3 h-0.5 border-t-2 border-dashed border-emerald-400 inline-block"></span>
+            <span class="flex items-center gap-2 text-brand-400 font-medium">
+              <span class="w-3 h-0.5 border-t-2 border-dashed border-brand-500 inline-block"></span>
               Predicción (+12h)
             </span>
           </div>
@@ -365,15 +412,15 @@
           <div class="flex items-center justify-between mb-4 shrink-0">
             <div>
               <h2 class="text-base font-bold text-white">Mapa de Estaciones en Vivo</h2>
-              <p class="text-xs text-slate-400 mt-0.5">Haz clic en cualquier marcador para cargar su detalle y pronóstico.</p>
+              <p class="text-xs text-gray-400 mt-0.5">Haz clic en cualquier marcador para cargar su detalle y pronóstico.</p>
             </div>
-            <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono text-slate-400">
+            <div class="hidden sm:flex items-center gap-3 text-[11px] font-mono text-gray-400">
               <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>≤12</span>
-              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>12-35.4</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-brand-400"></span>12-35.4</span>
               <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>&gt;35.4</span>
             </div>
           </div>
-          <div id="spainMap" class="flex-1 min-h-[18rem] w-full rounded-xl overflow-hidden border border-slate-800/90 z-10"></div>
+          <div id="spainMap" class="flex-1 min-h-[18rem] w-full rounded-xl overflow-hidden border border-gray-800 z-10"></div>
         </div>
 
         <!-- Ranking Comparativo Multi-Ciudad (5 columnas) -->
@@ -382,17 +429,17 @@
             <div class="flex items-center justify-between mb-4">
               <div>
                 <h2 class="text-base font-bold text-white">Ranking Calidad del Aire</h2>
-                <p class="text-xs text-slate-400 mt-0.5">Ordenado de aire más limpio a más cargado</p>
+                <p class="text-xs text-gray-400 mt-0.5">Ordenado de aire más limpio a más cargado</p>
               </div>
-              <span class="px-2.5 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700">Top 5</span>
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-brand-500/10 text-brand-400 border border-brand-500/20">Top 5</span>
             </div>
 
             <div id="cityRankingList" class="space-y-2.5">
-              <div class="text-xs text-slate-500 py-8 text-center">Cargando comparativa de ciudades...</div>
+              <div class="text-xs text-gray-500 py-8 text-center">Cargando comparativa de ciudades...</div>
             </div>
           </div>
 
-          <p class="mt-4 text-[11px] text-slate-500">
+          <p class="mt-4 text-[11px] text-gray-500">
             * Selecciona una fila del ranking para sincronizar el dashboard principal.
           </p>
         </div>
@@ -403,10 +450,14 @@
   </main>
 
   <!-- Pie de página -->
-  <footer class="border-t border-slate-900/90 py-5 px-4 text-center text-xs text-slate-500">
-    <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+  <footer class="border-t border-gray-800 py-6 px-4 bg-dark-900/90 text-center text-xs text-gray-500">
+    <div class="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
       <span>Pipeline asíncrono: Open-Meteo + OpenAQ v3 → Neon PostgreSQL</span>
-      <span class="font-mono text-slate-600">FastAPI · SQLAlchemy · Scikit-Learn</span>
+      <div class="flex items-center gap-4 font-medium">
+        <a href="https://lionsew.github.io/" target="_blank" rel="noopener noreferrer" class="hover:text-brand-400 transition">Portfolio</a>
+        <a href="https://github.com/Lionsew/air-quality-ml-api" target="_blank" rel="noopener noreferrer" class="hover:text-brand-400 transition">GitHub</a>
+        <a href="https://huggingface.co/spaces/Lionsew/air-quality-ml-api/tree/main" target="_blank" rel="noopener noreferrer" class="hover:text-brand-400 transition">Hugging Face</a>
+      </div>
     </div>
   </footer>
 
@@ -434,9 +485,9 @@
       } else if (pm25 <= 35.4) {
         return {
           label: "Moderada",
-          classes: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-          stroke: "#f59e0b",
-          glow: "bg-amber-500/10",
+          classes: "bg-brand-500/15 text-brand-400 border border-brand-500/30",
+          stroke: "#fb923c",
+          glow: "bg-brand-500/10",
           desc: "Calidad aceptable. Grupos especialmente sensibles deberían moderar esfuerzos prolongados al aire libre."
         };
       } else {
@@ -472,7 +523,7 @@
 
         const bands = [
           { min: 0, max: 12, color: "rgba(16, 185, 129, 0.08)" },     // Buena (Verde)
-          { min: 12, max: 35.4, color: "rgba(245, 158, 11, 0.08)" },  // Moderada (Ámbar)
+          { min: 12, max: 35.4, color: "rgba(249, 115, 22, 0.08)" },  // Moderada (Naranja Brand)
           { min: 35.4, max: 500, color: "rgba(244, 63, 94, 0.09)" }   // Desfavorable (Rojo)
         ];
 
@@ -544,8 +595,8 @@
             {
               label: "Histórico PM2.5 (µg/m³)",
               data: historicalValues,
-              borderColor: "#38bdf8",
-              backgroundColor: "rgba(56, 189, 248, 0.12)",
+              borderColor: "#fde68a",
+              backgroundColor: "rgba(253, 230, 138, 0.10)",
               borderWidth: 2,
               pointRadius: 0,
               pointHoverRadius: 4,
@@ -555,12 +606,12 @@
             {
               label: "Pronóstico +12h (µg/m³)",
               data: forecastValues,
-              borderColor: "#10b981",
-              backgroundColor: "rgba(16, 185, 129, 0.15)",
+              borderColor: "#f97316",
+              backgroundColor: "rgba(249, 115, 22, 0.16)",
               borderWidth: 2.5,
               borderDash: [6, 4],
               pointRadius: 3,
-              pointBackgroundColor: "#10b981",
+              pointBackgroundColor: "#fb923c",
               pointHoverRadius: 5,
               fill: true,
               tension: 0.35,
@@ -577,10 +628,10 @@
           plugins: {
             legend: { display: false },
             tooltip: {
-              backgroundColor: "rgba(15, 23, 42, 0.95)",
-              titleColor: "#94a3b8",
-              bodyColor: "#f8fafc",
-              borderColor: "#334155",
+              backgroundColor: "rgba(11, 15, 25, 0.95)",
+              titleColor: "#9ca3af",
+              bodyColor: "#f3f4f6",
+              borderColor: "#374151",
               borderWidth: 1,
               padding: 10,
               displayColors: true,
@@ -592,9 +643,9 @@
           },
           scales: {
             x: {
-              grid: { color: "rgba(51, 65, 85, 0.25)" },
+              grid: { color: "rgba(55, 65, 81, 0.3)" },
               ticks: {
-                color: "#64748b",
+                color: "#9ca3af",
                 maxTicksLimit: 10,
                 font: { family: "JetBrains Mono", size: 10 }
               }
@@ -602,9 +653,9 @@
             y: {
               beginAtZero: true,
               suggestedMax: 40,
-              grid: { color: "rgba(51, 65, 85, 0.25)" },
+              grid: { color: "rgba(55, 65, 81, 0.3)" },
               ticks: {
-                color: "#64748b",
+                color: "#9ca3af",
                 font: { family: "JetBrains Mono", size: 11 },
                 callback: (val) => `${val}`
               }
@@ -652,7 +703,7 @@
           const marker = L.circleMarker([item.latitude, item.longitude], {
             radius: isSelected ? 11 : 8,
             fillColor: cat.stroke,
-            color: isSelected ? "#ffffff" : "#0f172a",
+            color: isSelected ? "#ffffff" : "#0b0f19",
             weight: isSelected ? 2.5 : 1.5,
             opacity: 1,
             fillOpacity: 0.9
@@ -678,12 +729,12 @@
           row.type = "button";
           row.onclick = () => loadCityData(item.city);
           row.className = isSelected
-            ? "w-full p-3 rounded-xl bg-slate-800/90 border border-emerald-500/50 flex items-center justify-between transition text-left cursor-pointer"
-            : "w-full p-3 rounded-xl bg-slate-900/60 hover:bg-slate-800/70 border border-slate-800/80 flex items-center justify-between transition text-left cursor-pointer";
+            ? "w-full p-3 rounded-xl bg-dark-800/90 border border-brand-500/60 flex items-center justify-between transition text-left cursor-pointer"
+            : "w-full p-3 rounded-xl bg-dark-900/60 hover:bg-dark-800/80 border border-gray-800 flex items-center justify-between transition text-left cursor-pointer";
 
           row.innerHTML = `
             <div class="flex items-center gap-3">
-              <span class="w-6 h-6 rounded-lg bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-slate-400 flex items-center justify-center">
+              <span class="w-6 h-6 rounded-lg bg-dark-900 border border-gray-800 text-xs font-mono font-bold text-brand-400 flex items-center justify-center">
                 #${index + 1}
               </span>
               <div>
@@ -691,14 +742,14 @@
                   <span class="text-sm font-semibold text-white">${item.city}</span>
                   <span class="w-2 h-2 rounded-full" style="background-color: ${cat.stroke}"></span>
                 </div>
-                <span class="text-[11px] text-slate-400 font-mono">
+                <span class="text-[11px] text-gray-400 font-mono">
                   ${item.temperature_2m}°C · Viento ${item.wind_speed_10m} km/h
                 </span>
               </div>
             </div>
             <div class="text-right">
               <span class="text-sm font-mono font-bold text-white block">${item.predicted_pm25.toFixed(1)}</span>
-              <span class="text-[10px] font-mono text-slate-500">µg/m³</span>
+              <span class="text-[10px] font-mono text-gray-500">µg/m³</span>
             </div>
           `;
 
@@ -718,8 +769,8 @@
         ]);
         const data = await healthRes.json();
         if (data.status === "ok") {
-          badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span> Modelo &amp; Neon Activos`;
-          badge.className = "px-3 py-1.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/70 text-xs font-medium flex items-center gap-2";
+          badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span> Modelo &amp; Neon Activos`;
+          badge.className = "px-3 py-1.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20 text-xs font-medium flex items-center gap-2";
         } else {
           badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span> Servicio Degradado`;
           badge.className = "px-3 py-1.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/70 text-xs font-medium flex items-center gap-2";
@@ -802,9 +853,9 @@
 
       document.querySelectorAll(".city-btn").forEach(btn => {
         if (btn.dataset.city === city) {
-          btn.className = "city-btn px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm shadow-md shadow-emerald-950/60 transition-all duration-200";
+          btn.className = "city-btn px-4 py-2 rounded-lg bg-brand-500 text-black font-semibold text-sm shadow-sm shadow-brand-500/20 transition-all duration-200";
         } else {
-          btn.className = "city-btn px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/70 font-medium text-sm transition-all duration-200";
+          btn.className = "city-btn px-4 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-800 font-medium text-sm transition-all duration-200";
         }
       });
 
@@ -846,7 +897,7 @@
         deltaEl.textContent = `${sign}${diff.toFixed(2)} µg/m³`;
         deltaEl.className = Math.abs(diff) <= 3 
           ? "text-sm font-mono font-bold text-emerald-400" 
-          : "text-sm font-mono font-bold text-amber-400";
+          : "text-sm font-mono font-bold text-brand-400";
 
         const dateObj = new Date(data.recorded_at);
         document.getElementById("recordedAt").textContent = dateObj.toLocaleString("es-ES", {
