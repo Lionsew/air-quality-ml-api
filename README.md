@@ -1,3 +1,10 @@
+## title: Air Quality ML Predictor
+emoji: 🌬️
+colorFrom: emerald
+colorTo: blue
+sdk: docker
+pinned: false
+
 # 🌬️ Air Quality ML Predictor · MLOps & Forecasting Dashboard
 
 Sistema *end-to-end* de predicción y pronóstico de calidad del aire (**PM2.5**) para 5 ciudades españolas (**Alicante, Madrid, Barcelona, Valencia y Sevilla**). Combina datos meteorológicos y ambientales en tiempo real, modelos de Machine Learning en Scikit-Learn, persistencia en PostgreSQL (Neon), ingesta automatizada con GitHub Actions y un dashboard interactivo desplegado en Hugging Face Spaces.
