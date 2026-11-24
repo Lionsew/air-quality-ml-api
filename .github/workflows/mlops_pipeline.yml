@@ -14,4 +14,6 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://Lionsew:$HF_TOKEN@huggingface.co/spaces/Lionsew/air-quality-ml-api main
+        run: |
+          git config lfs.allowincompletepush true
+          git push --force https://Lionsew:$HF_TOKEN@huggingface.co/spaces/Lionsew/air-quality-ml-api main
