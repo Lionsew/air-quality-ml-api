@@ -16,6 +16,7 @@ __pycache__/
 # Logs y artefactos de entrenamiento (PyTorch Lightning / NeuralForecast)
 lightning_logs/
 *.ckpt
+model/nhits_forecast_model/
 
 # Datasets locales
 *.csv
@@ -26,3 +27,4 @@ lightning_logs/
 Thumbs.db
 .vscode/
 .idea/
+
