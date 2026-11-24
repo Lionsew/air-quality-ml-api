@@ -1,154 +1,216 @@
-import logging
+import os
+from datetime import datetime, timezone
 from pathlib import Path
-import joblib
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from neuralforecast import NeuralForecast
+from neuralforecast.models import NHITS
 
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.models import AirMeasurement, ModelMetric
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_OUT = BASE_DIR / "model" / "forecast_model.joblib"
+NHITS_MODEL_DIR = BASE_DIR / "model" / "nhits_forecast_model"
 
-HISTORY_HOURS = 84
-FORECAST_HOURS = 12
+# Festivos españoles estándar (anuales fijos) para features de calendario
+FIXED_HOLIDAYS_MD = {
+    (1, 1),   # Año Nuevo
+    (1, 6),   # Epifanía
+    (5, 1),   # Día del Trabajador
+    (8, 15),  # Asunción
+    (10, 12), # Fiesta Nacional
+    (11, 1),  # Todos los Santos
+    (12, 6),  # Día de la Constitución
+    (12, 8),  # Inmaculada Concepción
+    (12, 25), # Navidad
+    (12, 31), # Nochevieja
+}
+
+WEATHER_EXOG_COLS = [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "precipitation",
+]
+
+TEMPORAL_EXOG_COLS = [
+    "hour",
+    "day_of_week",
+    "month",
+    "day_of_year",
+    "week_of_year",
+    "is_weekend",
+    "is_holiday",
+    "is_workday",
+    "is_month_start",
+    "is_month_end",
+    "is_quarter_start",
+    "is_quarter_end",
+    "is_year_start",
+    "is_year_end",
+]
+
+ALL_EXOG_COLS = WEATHER_EXOG_COLS + TEMPORAL_EXOG_COLS
 
 
-def build_sliding_windows(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Construye ventanas deslizantes por ciudad:
-    - X: 84 valores horarios previos de PM2.5 + 4 estadísticos + 4 features cíclicas (92 features)
-    - y: 12 valores horarios futuros de PM2.5 (t+1 ... t+12)
-    """
-    X_list, y_list = [], []
-    df["recorded_at"] = pd.to_datetime(df["recorded_at"], utc=True)
+def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Añade todas las variables temporales y de calendario a partir de la columna `ds`."""
+    out = df.copy()
+    ds = pd.to_datetime(out["ds"], utc=True)
+    out["ds"] = ds
 
-    for city, group in df.groupby("city"):
-        group = group.sort_values("recorded_at").drop_duplicates(subset=["recorded_at"])
+    out["hour"] = ds.dt.hour.astype(int)
+    out["day_of_week"] = ds.dt.dayofweek.astype(int)
+    out["month"] = ds.dt.month.astype(int)
+    out["day_of_year"] = ds.dt.dayofyear.astype(int)
+    out["week_of_year"] = ds.dt.isocalendar().week.astype(int)
+    out["is_weekend"] = out["day_of_week"].isin([5, 6]).astype(int)
 
-        # Re-muestrear a frecuencia horaria regular e interpolar huecos cortos (máx 3h)
-        hourly = (
-            group.set_index("recorded_at")[["pm25"]]
-            .resample("1h")
-            .mean()
-            .interpolate(method="linear", limit=3)
-            .dropna()
-            .reset_index()
-        )
+    is_hol = [1 if (m, d) in FIXED_HOLIDAYS_MD else 0 for m, d in zip(out["month"], ds.dt.day)]
+    out["is_holiday"] = pd.Series(is_hol, index=out.index, dtype=int)
+    out["is_workday"] = ((out["is_weekend"] == 0) & (out["is_holiday"] == 0)).astype(int)
 
-        total_len = len(hourly)
-        min_required = HISTORY_HOURS + FORECAST_HOURS
+    out["is_month_start"] = ds.dt.is_month_start.astype(int)
+    out["is_month_end"] = ds.dt.is_month_end.astype(int)
+    out["is_quarter_start"] = ds.dt.is_quarter_start.astype(int)
+    out["is_quarter_end"] = ds.dt.is_quarter_end.astype(int)
+    out["is_year_start"] = ds.dt.is_year_start.astype(int)
+    out["is_year_end"] = ds.dt.is_year_end.astype(int)
+    return out
 
-        if total_len < min_required:
-            logger.warning(
-                f"[{city}] Solo hay {total_len}h continuas (se necesitan al menos {min_required}h). Saltando ciudad."
-            )
-            continue
 
-        values = hourly["pm25"].values
-        timestamps = hourly["recorded_at"]
+def build_nhits_dataframe(records: list[AirMeasurement]) -> pd.DataFrame:
+    """Convierte registros ORM de AirMeasurement al formato Nixtla (unique_id, ds, y + exógenas)."""
+    rows = []
+    for r in records:
+        rows.append({
+            "unique_id": r.city,
+            "ds": pd.to_datetime(r.recorded_at, utc=True).floor("h"),
+            "y": float(r.pm25),
+            "temperature_2m": float(r.temperature_2m),
+            "relative_humidity_2m": float(r.relative_humidity_2m),
+            "wind_speed_10m": float(r.wind_speed_10m),
+            "wind_direction_10m": float(r.wind_direction_10m),
+            "precipitation": float(r.precipitation),
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
 
-        for i in range(HISTORY_HOURS, total_len - FORECAST_HOURS + 1):
-            past_84 = values[i - HISTORY_HOURS : i]
-            future_12 = values[i : i + FORECAST_HOURS]
+    df = df.sort_values(["unique_id", "ds"]).drop_duplicates(subset=["unique_id", "ds"], keep="last")
 
-            ts = timestamps.iloc[i]
-            hour_sin = np.sin(2 * np.pi * ts.hour / 24.0)
-            hour_cos = np.cos(2 * np.pi * ts.hour / 24.0)
-            month_sin = np.sin(2 * np.pi * ts.month / 12.0)
-            month_cos = np.cos(2 * np.pi * ts.month / 12.0)
+    # Reindexar a frecuencia horaria continua por ciudad para evitar saltos en NeuralForecast
+    full_dfs = []
+    for city_id, group in df.groupby("unique_id"):
+        full_idx = pd.date_range(start=group["ds"].min(), end=group["ds"].max(), freq="h", tz="UTC")
+        g = group.set_index("ds").reindex(full_idx)
+        g.index.name = "ds"
+        g["unique_id"] = city_id
+        for col in ["y"] + WEATHER_EXOG_COLS:
+            g[col] = g[col].ffill().bfill().fillna(0.0)
+        full_dfs.append(g.reset_index())
 
-            stats = [
-                float(np.mean(past_84)),
-                float(np.std(past_84)),
-                float(np.min(past_84)),
-                float(np.max(past_84)),
-            ]
-
-            features = np.concatenate([past_84, stats, [hour_sin, hour_cos, month_sin, month_cos]])
-            X_list.append(features)
-            y_list.append(future_12)
-
-    if not X_list:
-        return np.empty((0, 92)), np.empty((0, FORECAST_HOURS))
-
-    return np.array(X_list, dtype=np.float64), np.array(y_list, dtype=np.float64)
+    df_clean = pd.concat(full_dfs, ignore_index=True)
+    df_clean = add_temporal_features(df_clean)
+    return df_clean[["unique_id", "ds", "y"] + ALL_EXOG_COLS]
 
 
 def train():
-    # 1. Asegurar que la tabla model_metrics exista en Neon
-    Base.metadata.create_all(bind=engine)
+    """
+    Entrena el modelo NHITS (84h -> 12h) optimizado para reducir el overfit.
+    """
     db = SessionLocal()
-
     try:
-        query = db.query(AirMeasurement).statement
-        df = pd.read_sql(query, db.bind)
+        records = (
+            db.query(AirMeasurement)
+            .order_by(AirMeasurement.city, AirMeasurement.recorded_at)
+            .all()
+        )
+        if len(records) < 500:  # Aumentamos ligeramente el umbral de seguridad si es posible
+            raise RuntimeError(f"Datos insuficientes en BD para entrenar NHITS ({len(records)} registros).")
 
-        if df.empty:
-            logger.warning("La tabla air_measurements está vacía. Ejecuta seed_history.py primero.")
-            return
+        df = build_nhits_dataframe(records)
+        horizon = 12
+        input_size = 84  # 7 * 12h ventana de contexto
+        
+        # Validacion más amplia (ej. 7 días = 168 horas, o al menos 4 veces el horizonte)
+        val_size = horizon * 14 
 
-        # 2. Filtrar datos sintetizados por fallback
-        if "is_fallback" in df.columns:
-            initial_rows = len(df)
-            df = df[df["is_fallback"] == False].copy()  # noqa: E712
-            logger.info(f"Filtro Data Quality: {initial_rows - len(df)} filas fallback excluidas.")
-
-        logger.info(f"Registros válidos cargados desde Neon: {len(df)} filas en {df['city'].nunique()} ciudades.")
-        X, y = build_sliding_windows(df)
-
-        if len(X) < 15:
-            logger.warning(
-                f"Muestras insuficientes para entrenar ({len(X)} ventanas). "
-                "Acumula más horas (mínimo ~110h por ciudad) y vuelve a ejecutar."
+        min_len = df.groupby("unique_id").size().min()
+        if min_len < input_size + val_size + horizon:
+            raise RuntimeError(
+                f"Se requieren más registros por ciudad para la validación ampliada."
             )
-            return
 
-        # 3. División Train / Test y entrenamiento del pipeline
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # 1. Evaluación retrospectiva (cross_validation con un val_size realista)
+        eval_model = NHITS(
+                h=horizon,
+                input_size=input_size,
+                futr_exog_list=ALL_EXOG_COLS,
+                hist_exog_list=WEATHER_EXOG_COLS,
+                stack_types=["identity", "identity", "identity"],
+                n_blocks=[1, 1, 1],
+                # Arquitectura reducida pero uniforme para evitar conflictos de dimensiones
+                mlp_units=[[128, 128], [128, 128], [128, 128]],
+                n_pool_kernel_size=[2, 2, 1],
+                n_freq_downsample=[4, 2, 1],
+                max_steps=400,
+                val_check_steps=50,
+                early_stop_patience_steps=6,
+                learning_rate=5e-4,
+                batch_size=32,
+                scaler_type="robust",
+                accelerator="auto",
+                random_seed=42,
+            )
+        nf_eval = NeuralForecast(models=[eval_model], freq="h")
+        cv_df = nf_eval.cross_validation(df=df, h=horizon, n_windows=1, step_size=horizon, val_size=val_size)
 
-        pipeline = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", Ridge(alpha=15.0)),
-        ])
-        pipeline.fit(X_train, y_train)
+        y_true = np.clip(cv_df["y"].values, 0.0, None)
+        y_pred = np.clip(cv_df["NHITS"].values, 0.0, None)
 
-        # 4. Evaluación en conjunto de test
-        y_pred = np.maximum(0.0, pipeline.predict(X_test))
-        mae = float(mean_absolute_error(y_test, y_pred))
-        rmse = float(root_mean_squared_error(y_test, y_pred))
+        mae = float(mean_absolute_error(y_true, y_pred))
+        rmse = float(root_mean_squared_error(y_true, y_pred))
 
-        # 5. Guardar artefacto serializado del modelo
-        MODEL_OUT.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(pipeline, MODEL_OUT)
+        # 2. Modelo final con la misma arquitectura regularizada
+        prod_model = NHITS(
+                h=horizon,
+                input_size=input_size,
+                futr_exog_list=ALL_EXOG_COLS,
+                hist_exog_list=WEATHER_EXOG_COLS,
+                stack_types=["identity", "identity", "identity"],
+                n_blocks=[1, 1, 1],
+                # Arquitectura reducida pero uniforme para evitar conflictos de dimensiones
+                mlp_units=[[128, 128], [128, 128], [128, 128]],
+                n_pool_kernel_size=[2, 2, 1],
+                n_freq_downsample=[4, 2, 1],
+                max_steps=400,
+                val_check_steps=50,
+                early_stop_patience_steps=6,
+                learning_rate=5e-4,
+                batch_size=32,
+                scaler_type="robust",
+                accelerator="auto",
+                random_seed=42,
+            )
+        nf_prod = NeuralForecast(models=[prod_model], freq="h")
+        nf_prod.fit(df=df, val_size=val_size)
 
-        # 6. Registrar métricas en PostgreSQL (Neon)
-        metric_record = ModelMetric(
-            model_name="autoregressive_84h_ridge",
+        NHITS_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
+        nf_prod.save(path=str(NHITS_MODEL_DIR), model_index=None, overwrite=True, save_dataset=False)
+
+        metric = ModelMetric(
+            model_name="nhits_84h_exog",
             mae=round(mae, 4),
             rmse=round(rmse, 4),
-            samples_count=int(len(X)),
+            samples_count=len(df),
+            trained_at=datetime.now(timezone.utc),
         )
-        db.add(metric_record)
+        db.add(metric)
         db.commit()
-
-        logger.info(
-            f"Entrenamiento completado ({len(X)} ventanas) -> MAE: {mae:.2f} µg/m³ | RMSE: {rmse:.2f} µg/m³"
-        )
-        logger.info(f"Artefacto guardado en {MODEL_OUT} y métricas registradas en Neon.")
-
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error durante el entrenamiento: {e}")
-        raise
+        print(f"Modelo NHITS entrenado correctamente. MAE: {mae:.4f}, RMSE: {rmse:.4f}")
     finally:
         db.close()
 

@@ -29,8 +29,8 @@ class PredictionResponse(BaseModel):
 class TimeSeriesPoint(BaseModel):
     timestamp: datetime
     pm25: float
+    predicted_pm25: float | None = None
     is_forecast: bool
-
 
 class ForecastResponse(BaseModel):
     city: str

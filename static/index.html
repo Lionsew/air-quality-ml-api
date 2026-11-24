@@ -204,6 +204,30 @@
       </div>
     </div>
 
+    <!-- Barra de Progreso MLOps: Reentrenamiento NHITS en curso -->
+    <div id="retrainProgressBox" class="hidden mb-6 p-5 rounded-xl bg-dark-800/95 border border-brand-500/40 shadow-lg shadow-brand-500/10">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+        <div class="flex items-center gap-2.5">
+          <svg class="w-4 h-4 text-brand-400 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+          </svg>
+          <span id="retrainStageText" class="text-sm font-semibold text-white">Iniciando pipeline de reentrenamiento NHITS...</span>
+        </div>
+        <div class="flex items-center gap-3 text-xs font-mono">
+          <span id="retrainEtaText" class="text-brand-400">Tiempo estimado: ~45s</span>
+          <span id="retrainPercentText" class="text-gray-300 font-bold">0%</span>
+        </div>
+      </div>
+      <div class="w-full h-2.5 rounded-full bg-dark-900 border border-gray-800 overflow-hidden">
+        <div id="retrainProgressBar" class="h-full rounded-full bg-gradient-to-r from-brand-600 via-brand-500 to-amber-300 transition-all duration-300 ease-out" style="width: 0%"></div>
+      </div>
+      <div class="mt-2 flex items-center justify-between text-[11px] text-gray-400 font-mono">
+        <span id="retrainSubstageText">Preparando ventanas temporales (84h → 12h) y variables exógenas...</span>
+        <span id="retrainElapsedText">Transcurrido: 0s</span>
+      </div>
+    </div>
+
     <!-- Grid Principal -->
     <div id="dashboard" class="space-y-6 transition-opacity duration-200">
       
@@ -365,36 +389,43 @@
         </div>
       </div>
 
-      <!-- Fila 2: Gráfico Serie Temporal (84h Históricas + 12h Predicción) -->
+      <!-- Fila 2: Gráfico Serie Temporal (84h Históricas + 12h Predicción + Comparativa Modelo) -->
       <div class="glass-card rounded-2xl p-6 sm:p-8">
         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
           <div>
             <div class="flex flex-wrap items-center gap-2.5">
-              <h2 class="text-base font-bold text-white">Ventana Temporal: Histórico (84h) &amp; Pronóstico (+12h)</h2>
+              <h2 class="text-base font-bold text-white">Ventana Temporal: Histórico (<span id="histTitleCount">84</span>h) &amp; Pronóstico (+12h)</h2>
               <span id="forecastModelBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">
                 Cargando modelo...
               </span>
               <span id="mlopsMetricsBadge" class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-brand-500/10 text-brand-400 border border-brand-500/20">
                 MAE: -- · RMSE: --
               </span>
+              <span id="windowErrorBadge" class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-sky-500/10 text-sky-300 border border-sky-500/30">
+                Δ Modelo: --
+              </span>
               <button onclick="triggerRetrain()" title="Forzar reentrenamiento del modelo ahora" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-brand-400 border border-gray-700 transition cursor-pointer">
                 ↻ Reentrenar
               </button>
             </div>
             <p class="text-xs text-gray-400 mt-1">
-              Evolución de concentración PM2.5 (µg/m³) basada en la ventana reciente almacenada en Neon y proyección a 12 horas.
+              Comparativa entre concentración real PM2.5 (µg/m³), estimación del modelo ML y proyección futura a 12 horas.
             </p>
           </div>
 
           <!-- Leyenda personalizada -->
-          <div class="flex items-center gap-4 text-xs shrink-0">
+          <div class="flex flex-wrap items-center gap-4 text-xs shrink-0">
             <span class="flex items-center gap-2 text-gray-300">
               <span class="w-3 h-0.5 bg-amber-300 inline-block"></span>
-              Histórico (<span id="histCount">--</span>h)
+              Valor Real (<span id="histCount">--</span>h)
+            </span>
+            <span class="flex items-center gap-2 text-sky-400">
+              <span class="w-3 h-0.5 border-t-2 border-dotted border-sky-400 inline-block"></span>
+              Estimado Modelo
             </span>
             <span class="flex items-center gap-2 text-brand-400 font-medium">
               <span class="w-3 h-0.5 border-t-2 border-dashed border-brand-500 inline-block"></span>
-              Predicción (+12h)
+              Forecast (+12h)
             </span>
           </div>
         </div>
@@ -511,7 +542,7 @@
       arc.style.stroke = strokeColor;
     }
 
-    // Plugin para pintar las bandas horizontales de niveles de contaminación en el fondo del gráfico
+    // Plugin para pintar bandas de calidad del aire y la línea divisoria de inicio de Forecast (t0)
     const airQualityBandsPlugin = {
       id: "airQualityBands",
       beforeDraw(chart) {
@@ -559,28 +590,152 @@
           }
         });
 
+        // Línea vertical divisoria donde empieza el Forecast (t0)
+        const forecastStartIdx = chart.config._config._forecastStartIdx;
+        if (typeof forecastStartIdx === "number" && forecastStartIdx >= 0 && scales.x) {
+          const xPos = scales.x.getPixelForValue(forecastStartIdx);
+          if (xPos >= left && xPos <= right) {
+            ctx.beginPath();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "rgba(249, 115, 22, 0.65)";
+            ctx.lineWidth = 1.5;
+            ctx.moveTo(xPos, top);
+            ctx.lineTo(xPos, bottom);
+            ctx.stroke();
+
+            ctx.fillStyle = "#fb923c";
+            ctx.font = "bold 10px 'JetBrains Mono', monospace";
+            ctx.fillText("Inicio Forecast →", Math.min(xPos + 6, right - 105), top + 14);
+          }
+        }
+
         ctx.restore();
       }
     };
 
-    function renderForecastChart(forecastData) {
+    function renderForecastChart(forecastData, currentPrediction = null) {
       const ctx = document.getElementById("forecastChart").getContext("2d");
-      const series = forecastData.series;
 
-      document.getElementById("histCount").textContent = forecastData.history_hours;
-      document.getElementById("forecastModelBadge").textContent = 
-        forecastData.model_used === "autoregressive_84h_ridge" 
-          ? "Modelo: Ridge Autoregresivo (84h)" 
-          : "Modelo: Híbrido Meteo + ML (12h)";
+      // Normaliza puntos históricos y futuros soportando distintos nombres de campo del backend
+      let normalizedSeries = [];
+      if (Array.isArray(forecastData.series) && forecastData.series.length > 0) {
+        normalizedSeries = forecastData.series.map(pt => {
+          const isForecast = Boolean(
+            pt.is_forecast === true || pt.is_forecast === "true" || pt.type === "forecast"
+          );
+          const realVal = !isForecast && pt.pm25 != null ? Number(pt.pm25) : null;
+          const modelVal =
+            pt.predicted_pm25 != null
+              ? Number(pt.predicted_pm25)
+              : pt.model_pm25 != null
+              ? Number(pt.model_pm25)
+              : pt.forecast != null
+              ? Number(pt.forecast)
+              : isForecast && pt.pm25 != null
+              ? Number(pt.pm25)
+              : null;
 
-      const labels = series.map(pt => {
+          return {
+            timestamp: pt.timestamp || pt.time || pt.recorded_at,
+            real: Number.isNaN(realVal) ? null : realVal,
+            model: Number.isNaN(modelVal) ? null : modelVal,
+            is_forecast: isForecast
+          };
+        });
+      } else {
+        const hist = Array.isArray(forecastData.history) ? forecastData.history : [];
+        const pred = Array.isArray(forecastData.forecast)
+          ? forecastData.forecast
+          : Array.isArray(forecastData.predictions)
+          ? forecastData.predictions
+          : [];
+
+        normalizedSeries = [
+          ...hist.map(pt => ({
+            timestamp: pt.timestamp || pt.time || pt.recorded_at,
+            real: pt.pm25 != null ? Number(pt.pm25) : Number(pt.value),
+            model:
+              pt.predicted_pm25 != null
+                ? Number(pt.predicted_pm25)
+                : pt.model_pm25 != null
+                ? Number(pt.model_pm25)
+                : null,
+            is_forecast: false
+          })),
+          ...pred.map(pt => ({
+            timestamp: pt.timestamp || pt.time || pt.recorded_at,
+            real: pt.actual_pm25 != null ? Number(pt.actual_pm25) : null,
+            model: Number(pt.predicted_pm25 ?? pt.pm25 ?? pt.value),
+            is_forecast: true
+          }))
+        ];
+      }
+
+      // Localiza el último punto histórico (t0)
+      let lastHistIdx = -1;
+      for (let i = normalizedSeries.length - 1; i >= 0; i--) {
+        if (!normalizedSeries[i].is_forecast) {
+          lastHistIdx = i;
+          break;
+        }
+      }
+
+      // Si el backend no envió predicción histórica en t0, inyecta la inferencia instantánea de /predict
+      if (
+        lastHistIdx >= 0 &&
+        normalizedSeries[lastHistIdx].model === null &&
+        typeof currentPrediction === "number" &&
+        !Number.isNaN(currentPrediction)
+      ) {
+        normalizedSeries[lastHistIdx].model = currentPrediction;
+      }
+
+      const histPoints = normalizedSeries.filter(pt => !pt.is_forecast);
+      const forecastPoints = normalizedSeries.filter(pt => pt.is_forecast);
+      const histHoursCount = forecastData.history_hours ?? histPoints.length;
+
+      document.getElementById("histCount").textContent = histHoursCount;
+      document.getElementById("histTitleCount").textContent = histHoursCount;
+      document.getElementById("forecastModelBadge").textContent =
+        forecastData.model_used === "nhits_84h_exog"
+          ? "Modelo: NHITS + Exógenas (84h)"
+          : `Modelo: ${forecastData.model_used || "Híbrido Meteo + ML"} (+${forecastPoints.length}h)`;
+
+      // Calcula el error absoluto medio (MAE) o desviación en t0 donde existan ambos valores
+      const comparablePoints = normalizedSeries.filter(pt => pt.real !== null && pt.model !== null);
+      const errorBadge = document.getElementById("windowErrorBadge");
+      if (comparablePoints.length > 0) {
+        const maeWindow =
+          comparablePoints.reduce((acc, pt) => acc + Math.abs(pt.model - pt.real), 0) /
+          comparablePoints.length;
+        errorBadge.textContent =
+          comparablePoints.length === 1
+            ? `Δ en t₀: ${(comparablePoints[0].model - comparablePoints[0].real >= 0 ? "+" : "")}${(comparablePoints[0].model - comparablePoints[0].real).toFixed(2)} µg/m³`
+            : `MAE ventana: ${maeWindow.toFixed(2)} µg/m³`;
+        errorBadge.classList.remove("hidden");
+      } else {
+        errorBadge.classList.add("hidden");
+      }
+
+      const labels = normalizedSeries.map(pt => {
         const d = new Date(pt.timestamp);
-        return d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+        if (Number.isNaN(d.getTime())) return String(pt.timestamp || "");
+        return d.toLocaleString("es-ES", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "UTC"
+        });
       });
 
-      const lastHistIdx = series.findLastIndex(pt => !pt.is_forecast);
-      const historicalValues = series.map((pt, idx) => (!pt.is_forecast ? pt.pm25 : null));
-      const forecastValues = series.map((pt, idx) => (pt.is_forecast || idx === lastHistIdx ? pt.pm25 : null));
+      const realValues = normalizedSeries.map(pt => (!pt.is_forecast ? pt.real : null));
+      const historicalModelValues = normalizedSeries.map(pt => (!pt.is_forecast ? pt.model : null));
+      const futureForecastValues = normalizedSeries.map((pt, idx) => {
+        if (pt.is_forecast) return pt.model;
+        if (idx === lastHistIdx) return pt.model ?? pt.real;
+        return null;
+      });
 
       if (forecastChartInstance) {
         forecastChartInstance.destroy();
@@ -589,14 +744,15 @@
       forecastChartInstance = new Chart(ctx, {
         type: "line",
         plugins: [airQualityBandsPlugin],
+        _forecastStartIdx: lastHistIdx,
         data: {
           labels,
           datasets: [
             {
-              label: "Histórico PM2.5 (µg/m³)",
-              data: historicalValues,
+              label: "Valor Real",
+              data: realValues,
               borderColor: "#fde68a",
-              backgroundColor: "rgba(253, 230, 138, 0.10)",
+              backgroundColor: "rgba(253, 230, 138, 0.08)",
               borderWidth: 2,
               pointRadius: 0,
               pointHoverRadius: 4,
@@ -604,15 +760,30 @@
               tension: 0.35,
             },
             {
-              label: "Pronóstico +12h (µg/m³)",
-              data: forecastValues,
+              label: "Estimado Modelo",
+              data: historicalModelValues,
+              borderColor: "#38bdf8",
+              backgroundColor: "rgba(56, 189, 248, 0.12)",
+              borderWidth: 2,
+              borderDash: [2, 3],
+              pointRadius: (ctx) => (ctx.dataIndex === lastHistIdx ? 5 : 1.5),
+              pointBackgroundColor: "#38bdf8",
+              pointHoverRadius: 5,
+              fill: false,
+              tension: 0.35,
+            },
+            {
+              label: "Forecast (+12h)",
+              data: futureForecastValues,
               borderColor: "#f97316",
-              backgroundColor: "rgba(249, 115, 22, 0.16)",
+              backgroundColor: "rgba(249, 115, 22, 0.20)",
               borderWidth: 2.5,
               borderDash: [6, 4],
-              pointRadius: 3,
+              pointRadius: 3.5,
               pointBackgroundColor: "#fb923c",
-              pointHoverRadius: 5,
+              pointBorderColor: "#0b0f19",
+              pointBorderWidth: 1,
+              pointHoverRadius: 6,
               fill: true,
               tension: 0.35,
             }
@@ -637,7 +808,17 @@
               displayColors: true,
               callbacks: {
                 title: (items) => `${items[0].label} UTC`,
-                label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y} µg/m³`
+                label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed.y).toFixed(2)} µg/m³`,
+                afterBody: (items) => {
+                  const idx = items[0].dataIndex;
+                  const pt = normalizedSeries[idx];
+                  if (pt && pt.real !== null && pt.model !== null) {
+                    const diff = pt.model - pt.real;
+                    const sign = diff >= 0 ? "+" : "";
+                    return [`────────────────────`, `Diferencia (Modelo - Real): ${sign}${diff.toFixed(2)} µg/m³`];
+                  }
+                  return [];
+                }
               }
             }
           },
@@ -807,13 +988,69 @@
       const btn = document.getElementById("retrainBtn");
       const spinner = document.getElementById("retrainSpinner");
       const btnText = document.getElementById("retrainBtnText");
+      const chartRetrainBtn = document.querySelector("button[title='Forzar reentrenamiento del modelo ahora']");
+
+      const progressBox = document.getElementById("retrainProgressBox");
+      const progressBar = document.getElementById("retrainProgressBar");
+      const stageText = document.getElementById("retrainStageText");
+      const substageText = document.getElementById("retrainSubstageText");
+      const etaText = document.getElementById("retrainEtaText");
+      const percentText = document.getElementById("retrainPercentText");
+      const elapsedText = document.getElementById("retrainElapsedText");
+
+      // Guarda la duración anterior si existe en localStorage para afinar la estimación
+      const estimatedTotalSec = Number(localStorage.getItem("nhits_last_train_sec")) || 45;
+      const startTime = Date.now();
 
       if (btn) {
         btn.disabled = true;
         btn.classList.add("opacity-70", "cursor-not-allowed");
       }
+      if (chartRetrainBtn) {
+        chartRetrainBtn.disabled = true;
+        chartRetrainBtn.classList.add("opacity-50", "cursor-not-allowed");
+      }
       if (spinner) spinner.classList.remove("hidden");
       if (btnText) btnText.textContent = "Entrenando...";
+
+      progressBox.classList.remove("hidden");
+      progressBar.style.width = "4%";
+      percentText.textContent = "4%";
+      etaText.textContent = `Tiempo estimado: ~${estimatedTotalSec}s`;
+
+      const timer = setInterval(() => {
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        const remainingSec = Math.max(1, Math.ceil(estimatedTotalSec - elapsedSec));
+        // Curva asintótica hasta 94% mientras el servidor termina
+        const rawRatio = elapsedSec / estimatedTotalSec;
+        const pct = rawRatio <= 0.9
+          ? Math.min(90, Math.round(4 + rawRatio * 95))
+          : Math.min(95, Math.round(90 + (1 - Math.exp(-(rawRatio - 0.9) * 2)) * 5));
+
+        progressBar.style.width = `${pct}%`;
+        percentText.textContent = `${pct}%`;
+        elapsedText.textContent = `Transcurrido: ${Math.floor(elapsedSec)}s`;
+
+        if (elapsedSec < estimatedTotalSec) {
+          etaText.textContent = `Tiempo restante: ~${remainingSec}s`;
+        } else {
+          etaText.textContent = "Finalizando validación...";
+        }
+
+        if (pct < 20) {
+          stageText.textContent = "1/4 · Extrayendo histórico y variables exógenas...";
+          substageText.textContent = "Cargando series de Neon PostgreSQL y generando features de calendario...";
+        } else if (pct < 55) {
+          stageText.textContent = "2/4 · Validación cruzada NHITS (84h → 12h)...";
+          substageText.textContent = "Evaluando bloques jerárquicos y calculando MAE / RMSE...";
+        } else if (pct < 88) {
+          stageText.textContent = "3/4 · Entrenando modelo final de producción...";
+          substageText.textContent = "Optimizando pesos de red profunda con variables meteorológicas...";
+        } else {
+          stageText.textContent = "4/4 · Guardando modelo y recargando memoria...";
+          substageText.textContent = "Persistiendo artefacto NHITS y registrando métricas en Neon...";
+        }
+      }, 400);
 
       try {
         const res = await fetch("/model/retrain", {
@@ -826,15 +1063,34 @@
           throw new Error(data.detail || "No se pudo completar el reentrenamiento.");
         }
 
+        clearInterval(timer);
+        const totalElapsed = Math.max(5, Math.round((Date.now() - startTime) / 1000));
+        localStorage.setItem("nhits_last_train_sec", String(totalElapsed));
+
+        progressBar.style.width = "100%";
+        percentText.textContent = "100%";
+        etaText.textContent = `Completado en ${totalElapsed}s`;
+        stageText.textContent = "Reentrenamiento completado con éxito";
+        substageText.textContent = "Sincronizando métricas y pronóstico actualizado...";
+
         await checkHealthAndMetrics();
         await loadCityData(currentCity);
-        alert("Modelo reentrenado con éxito y métricas actualizadas.");
+
+        setTimeout(() => {
+          progressBox.classList.add("hidden");
+        }, 2500);
       } catch (err) {
+        clearInterval(timer);
+        progressBox.classList.add("hidden");
         alert("Error: " + err.message);
       } finally {
         if (btn) {
           btn.disabled = false;
           btn.classList.remove("opacity-70", "cursor-not-allowed");
+        }
+        if (chartRetrainBtn) {
+          chartRetrainBtn.disabled = false;
+          chartRetrainBtn.classList.remove("opacity-50", "cursor-not-allowed");
         }
         if (spinner) spinner.classList.add("hidden");
         if (btnText) btnText.textContent = "Reentrenar ahora";
@@ -915,7 +1171,16 @@
 
         if (forecastRes.ok) {
           const forecastData = await forecastRes.json();
-          renderForecastChart(forecastData);
+          renderForecastChart(forecastData, pred);
+        } else {
+          renderForecastChart({
+            history_hours: 1,
+            model_used: "Inferencia Instantánea (t₀)",
+            series: [
+              { timestamp: data.recorded_at, pm25: recorded, predicted_pm25: pred, is_forecast: false },
+              { timestamp: new Date(new Date(data.recorded_at).getTime() + 3600000).toISOString(), pm25: pred, is_forecast: true }
+            ]
+          }, pred);
         }
 
         await loadCitiesSummary();
