@@ -28,3 +28,13 @@ Thumbs.db
 .vscode/
 .idea/
 
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Secretos y datos locales
+.env
+*.csv
+*.xlsx
