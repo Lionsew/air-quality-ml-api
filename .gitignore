@@ -1,51 +1,28 @@
-# Entorno virtual
+# Entornos virtuales
 .venv/
 venv/
-ENV/
 env/
 
-.cache.sqlite
-**/ .cache.sqlite
-*.sqlite
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
 
-# Caché y archivos compilados de Python
+# Caché de Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.pytest_cache/
 
-# Variables de entorno y secretos (NUNCA subir claves de API ni credenciales)
-.env
-.env.local
-.env.*.local
+# Logs y artefactos de entrenamiento (PyTorch Lightning / NeuralForecast)
+lightning_logs/
+*.ckpt
 
-# Base de datos local SQLite y almacenamiento de datos
-*.db
-*.sqlite3
-data/
+# Datasets locales
+*.csv
+*.xlsx
 
-# Modelos entrenados o binarios grandes (opcional si son muy pesados; descomentar si no quieres subirlos)
-# model/*.joblib
-# model/*.pkl
-
-# Archivos de configuración de editores / IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sistema operativo
+# Archivos del sistema / IDE
 .DS_Store
 Thumbs.db
-
-.cache.sqlite
-**/ .cache.sqlite
-*.sqlite
-
-.venv/
-__pycache__/
-*.pyc
-.env
-*.db
-*.sqlite3
+.vscode/
+.idea/
