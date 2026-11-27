@@ -480,39 +480,55 @@ def retrain_forecast_model(x_admin_token: str = Header(default="")):
 def get_cities_summary(db: Session = Depends(get_db)):
     """
     Devuelve el último estado meteorológico, coordenadas y predicción de PM2.5
-    para todas las ciudades monitorizadas, ordenadas de aire más limpio a más contaminado.
+    para todas las ciudades monitorizadas usando NHITS o fallback, ordenadas de aire más limpio a más contaminado.
     """
     target_cities = ["Londres", "Barcelona", "Roma", "Mumbai", "Tokyo", "Nueva York"]
-    latest_records = []
+    items = []
+    nhits_model = ml_assets.get("nhits_model")
 
     for city_name in target_cities:
-        rec = (
+        records = (
             db.query(AirMeasurement)
             .filter(AirMeasurement.city.ilike(city_name))
             .order_by(desc(AirMeasurement.recorded_at))
-            .first()
+            .limit(96)
+            .all()
         )
-        if rec:
-            latest_records.append(rec)
+        if not records:
+            continue
 
-    if not latest_records:
-        return CitiesSummaryResponse(cities=[])
+        records = list(reversed(records))
+        record = records[-1]
+        prediction = None
 
-    feature_df = _build_weather_features_df(latest_records)
-    preds = ml_assets["model"].predict(feature_df)
+        # Intentar predecir con NHITS igual que en /predict/{city}
+        if nhits_model is not None and len(records) >= 36:
+            try:
+                full_df = build_nhits_dataframe(records)
+                if len(full_df) >= 36:
+                    sub_hist = full_df.iloc[max(0, len(full_df) - 96):-12].copy()
+                    sub_futr = full_df.iloc[-12:][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
+                    with nhits_lock:
+                        block_last = nhits_model.predict(df=sub_hist, futr_df=sub_futr)
+                    prediction = max(0.0, round(float(block_last["NHITS"].iloc[-1]), 2))
+            except Exception:
+                prediction = None
 
-    items = []
-    for r, pred_val in zip(latest_records, preds):
+        # Fallback a modelo lineal si NHITS no está disponible para esa ciudad
+        if prediction is None:
+            feature_df = _build_weather_features_df([record])
+            prediction = max(0.0, round(float(ml_assets["model"].predict(feature_df)[0]), 2))
+
         items.append(
             CitySummaryItem(
-                city=r.city,
-                latitude=r.latitude,
-                longitude=r.longitude,
-                predicted_pm25=max(0.0, round(float(pred_val), 2)),
-                recorded_pm25=round(float(r.pm25), 2),
-                temperature_2m=round(float(r.temperature_2m), 1),
-                wind_speed_10m=round(float(r.wind_speed_10m), 1),
-                recorded_at=r.recorded_at,
+                city=record.city,
+                latitude=record.latitude,
+                longitude=record.longitude,
+                predicted_pm25=prediction,
+                recorded_pm25=round(float(record.pm25), 2),
+                temperature_2m=round(float(record.temperature_2m), 1),
+                wind_speed_10m=round(float(record.wind_speed_10m), 1),
+                recorded_at=record.recorded_at,
             )
         )
 
