@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import httpx
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -12,17 +12,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 TARGET_CITIES = [
-    {"name": "Alicante", "lat": 38.351111, "lon": -0.513889},
-    {"name": "Madrid", "lat": 40.416775, "lon": -3.703790},
+    {"name": "Londres", "lat": 51.507351, "lon": -0.127758},
     {"name": "Barcelona", "lat": 41.385064, "lon": 2.173404},
-    {"name": "Valencia", "lat": 39.469907, "lon": -0.376288},
-    {"name": "Sevilla", "lat": 37.389092, "lon": -5.984459},
+    {"name": "Roma", "lat": 41.902783, "lon": 12.496366},
+    {"name": "Mumbai", "lat": 19.075984, "lon": 72.877656},
+    {"name": "Tokyo", "lat": 35.676192, "lon": 139.650311},
+    {"name": "Nueva York", "lat": 40.712776, "lon": -74.005974},
 ]
 
-PAST_DAYS = 7
+DAYS_HISTORY = 90  # Últimos 3 meses
+
+
+def _get_date_range() -> tuple[str, str]:
+    """Calcula start_date (hace 90 días) y end_date (hoy) en formato YYYY-MM-DD UTC."""
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=DAYS_HISTORY)
+    return start.isoformat(), today.isoformat()
 
 
 async def fetch_historical_weather(client: httpx.AsyncClient, lat: float, lon: float) -> pd.DataFrame:
+    start_date, end_date = _get_date_range()
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
@@ -34,11 +43,11 @@ async def fetch_historical_weather(client: httpx.AsyncClient, lat: float, lon: f
             "wind_direction_10m",
             "precipitation",
         ],
-        "past_days": PAST_DAYS,
-        "forecast_days": 0,
+        "start_date": start_date,
+        "end_date": end_date,
         "timezone": "UTC",
     }
-    resp = await client.get(url, params=params, timeout=15.0)
+    resp = await client.get(url, params=params, timeout=30.0)
     resp.raise_for_status()
     hourly = resp.json().get("hourly", {})
     df = pd.DataFrame(hourly)
@@ -47,16 +56,17 @@ async def fetch_historical_weather(client: httpx.AsyncClient, lat: float, lon: f
 
 
 async def fetch_historical_pm25(client: httpx.AsyncClient, lat: float, lon: float) -> pd.DataFrame:
+    start_date, end_date = _get_date_range()
     url = "https://air-quality-api.open-meteo.com/v1/air-quality"
     params = {
         "latitude": lat,
         "longitude": lon,
         "hourly": ["pm2_5"],
-        "past_days": PAST_DAYS,
-        "forecast_days": 0,
+        "start_date": start_date,
+        "end_date": end_date,
         "timezone": "UTC",
     }
-    resp = await client.get(url, params=params, timeout=15.0)
+    resp = await client.get(url, params=params, timeout=30.0)
     resp.raise_for_status()
     hourly = resp.json().get("hourly", {})
     df = pd.DataFrame(hourly)
@@ -109,9 +119,12 @@ async def seed_city(client: httpx.AsyncClient, db: Session, city_info: dict):
             )
 
         if records_to_insert:
-            db.bulk_save_objects(records_to_insert)
-            db.commit()
-            logger.info(f"[{name}] Insertados {len(records_to_insert)} registros históricos en Neon.")
+            # Inserción en bloques de 500 para evitar timeouts en Neon PostgreSQL
+            batch_size = 500
+            for i in range(0, len(records_to_insert), batch_size):
+                db.bulk_save_objects(records_to_insert[i:i + batch_size])
+                db.commit()
+            logger.info(f"[{name}] Insertados {len(records_to_insert)} registros históricos (últimos {DAYS_HISTORY} días).")
         else:
             logger.info(f"[{name}] No hay nuevos registros históricos que insertar.")
 
@@ -127,11 +140,12 @@ async def run_seed():
         async with httpx.AsyncClient() as client:
             for city in TARGET_CITIES:
                 await seed_city(client, db, city)
+                await asyncio.sleep(1.0)  # Pausa breve para respetar rate limits de Open-Meteo
     finally:
         db.close()
 
 
 if __name__ == "__main__":
-    logger.info("Iniciando carga histórica (últimos 7 días) hacia Neon...")
+    logger.info(f"Iniciando carga histórica (últimos {DAYS_HISTORY} días) hacia la base de datos...")
     asyncio.run(run_seed())
     logger.info("Carga histórica completada.")

@@ -14,11 +14,12 @@ logger = logging.getLogger(__name__)
 
 # Ciudades de referencia para tu porfolio
 TARGET_CITIES = [
-    {"name": "Alicante", "lat": 38.351111, "lon": -0.513889},
-    {"name": "Madrid", "lat": 40.416775, "lon": -3.703790},
+    {"name": "Londres", "lat": 51.507351, "lon": -0.127758},
     {"name": "Barcelona", "lat": 41.385064, "lon": 2.173404},
-    {"name": "Valencia", "lat": 39.469907, "lon": -0.376288},
-    {"name": "Sevilla", "lat": 37.389092, "lon": -5.984459},
+    {"name": "Roma", "lat": 41.902783, "lon": 12.496366},
+    {"name": "Mumbai", "lat": 19.075984, "lon": 72.877656},
+    {"name": "Tokyo", "lat": 35.676192, "lon": 139.650311},
+    {"name": "Nueva York", "lat": 40.712776, "lon": -74.005974},
 ]
 
 

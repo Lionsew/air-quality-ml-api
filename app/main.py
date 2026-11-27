@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import threading
 import httpx
 import joblib
 import numpy as np
@@ -33,8 +34,9 @@ from train_forecast_model import (
     train,
 )
 
-# Diccionario en memoria para mantener los modelos cargados durante todo el ciclo de vida
+# Diccionario en memoria y lock para evitar colisiones de PyTorch Lightning entre peticiones simultáneas
 ml_assets = {}
+nhits_lock = threading.Lock()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = BASE_DIR / "model" / "linear_model.joblib"
@@ -99,62 +101,63 @@ def _predict_nhits_for_city(nhits_model: NeuralForecast, records: list[AirMeasur
        para comparar Real vs Modelo con precisión real de NHITS.
     2) El pronóstico futuro de +12h a partir del último timestamp registrado.
     """
-    full_df = build_nhits_dataframe(records)
-    city_id = full_df["unique_id"].iloc[-1]
+    with nhits_lock:
+        full_df = build_nhits_dataframe(records)
+        city_id = full_df["unique_id"].iloc[-1]
 
-    # Contexto de las últimas 84h hasta t0
-    context_df = full_df.tail(84).copy()
-    last_ts = context_df["ds"].max()
+        # Contexto de las últimas 84h hasta t0
+        context_df = full_df.tail(84).copy()
+        last_ts = context_df["ds"].max()
 
-    # Generar exactamente las 12 marcas horarias posteriores a last_ts para futr_df
-    future_ds = pd.date_range(start=last_ts + pd.Timedelta(hours=1), periods=12, freq="h", tz="UTC")
-    futr_base = pd.DataFrame({"unique_id": city_id, "ds": future_ds})
+        # Generar exactamente las 12 marcas horarias posteriores a last_ts para futr_df
+        future_ds = pd.date_range(start=last_ts + pd.Timedelta(hours=1), periods=12, freq="h", tz="UTC")
+        futr_base = pd.DataFrame({"unique_id": city_id, "ds": future_ds})
 
-    if not meteo_df.empty:
-        futr_base = pd.merge(futr_base, meteo_df, on="ds", how="left")
-    else:
+        if not meteo_df.empty:
+            futr_base = pd.merge(futr_base, meteo_df, on="ds", how="left")
+        else:
+            for col in WEATHER_EXOG_COLS:
+                futr_base[col] = np.nan
+
+        # Si falta algún dato futuro en Open-Meteo, rellenar con los últimos valores conocidos
         for col in WEATHER_EXOG_COLS:
-            futr_base[col] = np.nan
+            last_known = float(context_df[col].iloc[-1])
+            futr_base[col] = futr_base[col].ffill().bfill().fillna(last_known)
 
-    # Si falta algún dato futuro en Open-Meteo, rellenar con los últimos valores conocidos
-    for col in WEATHER_EXOG_COLS:
-        last_known = float(context_df[col].iloc[-1])
-        futr_base[col] = futr_base[col].ffill().bfill().fillna(last_known)
+        futr_df = add_temporal_features(futr_base)[["unique_id", "ds"] + ALL_EXOG_COLS]
+        future_preds_df = nhits_model.predict(df=context_df, futr_df=futr_df).sort_values("ds")
 
-    futr_df = add_temporal_features(futr_base)[["unique_id", "ds"] + ALL_EXOG_COLS]
-    future_preds_df = nhits_model.predict(df=context_df, futr_df=futr_df).sort_values("ds")
+        # Estimación histórica con NHITS mediante ventanas deslizantes sobre full_df
+        hist_est_map: dict[pd.Timestamp, float] = {}
+        if len(full_df) >= 96:
+            # Evaluar bloques de 12h sobre el histórico usando NHITS
+            for end_idx in range(96, len(full_df) + 1, 12):
+                sub_hist = full_df.iloc[max(0, end_idx - 96):end_idx - 12].copy()
+                sub_futr = full_df.iloc[end_idx - 12:end_idx][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
+                if len(sub_hist) >= 24 and len(sub_futr) == 12:
+                    block_pred = nhits_model.predict(df=sub_hist, futr_df=sub_futr)
+                    for _, prow in block_pred.iterrows():
+                        hist_est_map[prow["ds"]] = max(0.0, round(float(prow["NHITS"]), 2))
 
-    # Estimación histórica con NHITS mediante ventanas deslizantes sobre full_df
-    hist_est_map: dict[pd.Timestamp, float] = {}
-    if len(full_df) >= 96:
-        # Evaluar bloques de 12h sobre el histórico usando NHITS
-        for end_idx in range(96, len(full_df) + 1, 12):
-            sub_hist = full_df.iloc[max(0, end_idx - 96):end_idx - 12].copy()
-            sub_futr = full_df.iloc[end_idx - 12:end_idx][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
-            if len(sub_hist) >= 24 and len(sub_futr) == 12:
-                block_pred = nhits_model.predict(df=sub_hist, futr_df=sub_futr)
-                for _, prow in block_pred.iterrows():
-                    hist_est_map[prow["ds"]] = max(0.0, round(float(prow["NHITS"]), 2))
+        # También evaluar las últimas 12h exactas ending at last_ts para que t0 tenga su estimación NHITS
+        if len(full_df) >= 36:
+            sub_hist_last = full_df.iloc[max(0, len(full_df) - 96):-12].copy()
+            sub_futr_last = full_df.iloc[-12:][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
+            block_last = nhits_model.predict(df=sub_hist_last, futr_df=sub_futr_last)
+            for _, prow in block_last.iterrows():
+                hist_est_map[prow["ds"]] = max(0.0, round(float(prow["NHITS"]), 2))
 
-    # También evaluar las últimas 12h exactas ending at last_ts para que t0 tenga su estimación NHITS
-    if len(full_df) >= 36:
-        sub_hist_last = full_df.iloc[max(0, len(full_df) - 96):-12].copy()
-        sub_futr_last = full_df.iloc[-12:][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
-        block_last = nhits_model.predict(df=sub_hist_last, futr_df=sub_futr_last)
-        for _, prow in block_last.iterrows():
-            hist_est_map[prow["ds"]] = max(0.0, round(float(prow["NHITS"]), 2))
-
-    hist_series = pd.Series(hist_est_map)
-    return hist_series, future_preds_df
+        hist_series = pd.Series(hist_est_map)
+        return hist_series, future_preds_df
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    
+
     if not MODEL_PATH.exists():
         raise RuntimeError(f"Modelo base no encontrado en {MODEL_PATH}. Ejecuta primero train_model.py.")
-    
+
     ml_assets["model"] = joblib.load(MODEL_PATH)
     ml_assets["nhits_model"] = NeuralForecast.load(path=str(NHITS_MODEL_DIR)) if NHITS_MODEL_DIR.exists() else None
     yield
@@ -276,7 +279,7 @@ def predict_air_quality(city: str, db: Session = Depends(get_db)):
     if not records:
         raise HTTPException(
             status_code=404,
-            detail=f"No se encontraron datos recientes para '{city}'. Ciudades disponibles: Alicante, Madrid, Barcelona, Valencia, Sevilla."
+            detail=f"No se encontraron datos recientes para '{city}'. Ciudades disponibles: Londres, Barcelona, Roma, Mumbai, Tokyo, Nueva York."
         )
 
     records = list(reversed(records))
@@ -291,7 +294,8 @@ def predict_air_quality(city: str, db: Session = Depends(get_db)):
             if len(full_df) >= 36:
                 sub_hist = full_df.iloc[max(0, len(full_df) - 96):-12].copy()
                 sub_futr = full_df.iloc[-12:][["unique_id", "ds"] + ALL_EXOG_COLS].copy()
-                block_last = nhits_model.predict(df=sub_hist, futr_df=sub_futr)
+                with nhits_lock:
+                    block_last = nhits_model.predict(df=sub_hist, futr_df=sub_futr)
                 prediction = max(0.0, round(float(block_last["NHITS"].iloc[-1]), 2))
         except Exception:
             prediction = None
@@ -322,7 +326,6 @@ async def forecast_air_quality(city: str, db: Session = Depends(get_db)):
     Devuelve el histórico de las últimas 84 horas (con valor real y estimación del modelo
     NHITS para comparar la desviación) y la proyección a 12 horas con NHITS + variables exógenas.
     """
-    # Obtenemos hasta 168 registros para dar contexto suficiente al backtest de NHITS sobre las últimas 84h
     all_records = (
         db.query(AirMeasurement)
         .filter(AirMeasurement.city.ilike(city.strip()))
@@ -349,7 +352,6 @@ async def forecast_air_quality(city: str, db: Session = Depends(get_db)):
         try:
             hist_est_series, future_preds_df = _predict_nhits_for_city(nhits_model, all_records, meteo_df)
 
-            # Fallback puntual solo para los primeros puntos donde no haya ventana previa de 84h
             fallback_preds = ml_assets["model"].predict(_build_weather_features_df(display_records))
 
             series: list[TimeSeriesPoint] = []
@@ -384,7 +386,7 @@ async def forecast_air_quality(city: str, db: Session = Depends(get_db)):
                 series=series,
             )
         except Exception as e:
-            print(f"[WARN] Fallback en /forecast/{city} por error en NHITS: {e}")
+            print(f"[WARN] Fallback en /forecast/{city} por error en NHITS: {repr(e)}")
 
     # 2. Fallback híbrido con pronóstico horario Open-Meteo + linear_model.joblib
     hist_preds = ml_assets["model"].predict(_build_weather_features_df(display_records))
@@ -459,9 +461,10 @@ def retrain_forecast_model(x_admin_token: str = Header(default="")):
         )
 
     try:
-        train()
-        if NHITS_MODEL_DIR.exists():
-            ml_assets["nhits_model"] = NeuralForecast.load(path=str(NHITS_MODEL_DIR))
+        with nhits_lock:
+            train()
+            if NHITS_MODEL_DIR.exists():
+                ml_assets["nhits_model"] = NeuralForecast.load(path=str(NHITS_MODEL_DIR))
         return {
             "status": "ok",
             "message": "Modelo NHITS reentrenado y recargado en memoria correctamente."
@@ -479,7 +482,7 @@ def get_cities_summary(db: Session = Depends(get_db)):
     Devuelve el último estado meteorológico, coordenadas y predicción de PM2.5
     para todas las ciudades monitorizadas, ordenadas de aire más limpio a más contaminado.
     """
-    target_cities = ["Alicante", "Madrid", "Barcelona", "Valencia", "Sevilla"]
+    target_cities = ["Londres", "Barcelona", "Roma", "Mumbai", "Tokyo", "Nueva York"]
     latest_records = []
 
     for city_name in target_cities:
